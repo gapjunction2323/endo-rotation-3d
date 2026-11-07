@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<script>
+// Seeds a profile with Day 1 core stations done, then opens the hash given in ?to= (for screenshots).
+const ids = ['dka', 'hhs', 'medrec', 'hyposort', 'pager', 'boss'];
+const stations = Object.fromEntries(ids.map((id) => [id, { done: true, score: 10, max: 10 }]));
+localStorage.setItem('endoRotation3d.v1', JSON.stringify({
+  xp: 190, days: { 1: { stations, completed: false } }, bonusDay: null, unlockAll: false, hideInstall: true,
+  profile: { name: 'Bender', avatar: '🦋', createdAt: Date.now() }, lastSaved: Date.now()
+}));
+location.replace('../index.html' + (new URLSearchParams(location.search).get('to') || ''));
+</script>

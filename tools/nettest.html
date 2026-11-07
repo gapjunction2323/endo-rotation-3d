@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Online self-test</title></head>
+<body>
+<pre id="out">running</pre>
+<script>
+// Online play against tools/netmock.js: sign-up, cloud save, guild, chat, raid, duels, market, presence, sync conflict.
+const out = document.getElementById('out');
+const log = [];
+const check = (label, ok) => log.push(`${ok ? 'PASS' : 'FAIL'} ${label}`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const ids = ['dka', 'hhs', 'medrec', 'hyposort', 'pager', 'boss'];
+localStorage.clear();
+localStorage.setItem('endoRotation3d.v1', JSON.stringify({
+  xp: 190, days: { 1: { stations: Object.fromEntries(ids.map((id) => [id, { done: true, score: 10, max: 10 }])), completed: false } },
+  bonusDay: null, unlockAll: false, hideInstall: true, lastSaved: Date.now(),
+  profile: { name: 'Bender', avatar: '🦋', createdAt: Date.now() },
+  rpg: { coins: 100, mats: { sample: 4, fragment: 3 }, items: { coat_short: 1, tool_steth: 1 }, equip: { coat: 'coat_short' }, seenIntro: true }
+}));
+
+const frame = document.createElement('iframe');
+frame.style.cssText = 'width:420px;height:800px';
+frame.src = 'netmock.html';
+document.body.appendChild(frame);
+
+// once: the welcome-screen tests below reload the frame, which must not restart the suite.
+frame.addEventListener('load', async () => {
+  const W = frame.contentWindow;
+  const doc = () => W.document;
+  const $ = (s) => doc().querySelector(s);
+  const $$ = (s) => [...doc().querySelectorAll(s)];
+  const errors = [];
+  W.addEventListener('error', (e) => errors.push(e.message));
+  W.addEventListener('unhandledrejection', (e) => errors.push('rejection: ' + (e.reason && e.reason.message)));
+  const saved = () => JSON.parse(W.localStorage.getItem('endoRotation3d.v1'));
+  const mock = () => W.EndoNetMock.db();
+  async function waitFor(fn, ms = 4000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(40); }
+    return null;
+  }
+  const go = async (hash, sel) => {
+    if (W.location.hash === hash) { W.location.hash = '#/badges'; await waitFor(() => !$(sel)); }
+    W.location.hash = hash;
+    return waitFor(() => $(sel));
+  };
+  const btn = (text, root = doc()) => [...root.querySelectorAll('button, a.btn')].find((b) => b.textContent.includes(text));
+  const toText = (html) => { const t = doc().createElement('template'); t.innerHTML = html; return t.content.textContent.trim(); };
+  async function answerQuiz(right = true) {
+    let n = 0;
+    while (await waitFor(() => $('.quiz h3'), 3000)) {
+      const q = W.EndoNetDebug.pool.find((p) => toText(p.q) === $('.quiz h3').textContent.trim());
+      const ok = q && toText(q.options.find((o) => o.ok).t);
+      const opts = $$('.quiz .opt');
+      const pick = opts.find((b) => (b.querySelector('span:last-child').textContent.trim() === ok) === right) || opts[0];
+      pick.click();
+      n++;
+      const next = await waitFor(() => btn('Next') || btn('Finish'));
+      const finishing = next.textContent.includes('Finish');
+      next.click();
+      if (finishing) break;
+      await sleep(30);
+    }
+    return n;
+  }
+
+  try {
+    // ---------- offline world bits ----------
+    await waitFor(() => $('#wc'));
+    check('world renders with online NPCs', !!$('#hudNet') && W.ENDO_RPG.world.npcs.some((n) => n.id === 'badgeoffice'));
+    check('HUD shows sign-in nudge', $('#hudNet').textContent.includes('!'));
+
+    // ---------- sign up ----------
+    await go('#/online', '.net-form');
+    const f = $('.net-form');
+    f.elements.email.value = 'bender@test.dev';
+    f.elements.password.value = 'hunter22';
+    btn('Create account', f).click();
+    await waitFor(() => $('[data-act="sync"]'));
+    check('account created and signed in', !!$('[data-act="sync"]') && !!W.localStorage.getItem('endoRotation3d.auth'));
+    const meId = JSON.parse(W.localStorage.getItem('endoRotation3d.auth')).user.id;
+    await waitFor(() => mock().saves.length);
+    check('player row created', mock().players.some((p) => p.id === meId && p.name === 'Bender' && p.level === 3));
+    check('local progress pushed to cloud', mock().saves.some((s) => s.id === meId && s.data.xp === 190));
+
+    // ---------- guild ----------
+    await go('#/guild', '[data-f="join"]');
+    $('[data-f="join"]').elements.code.value = 'night1';
+    $('[data-f="join"] button').click();
+    await waitFor(() => $('.guild-head'));
+    check('joined guild by code', !!$('.guild-head') && $('.guild-head').textContent.includes('Night Float'));
+    check('roster lists both members', $$('.roster .mem').length === 2);
+    check('raid boss shown', !!$('.raid .hpbar') && mock().raids.length === 1);
+    check('chat history shown', $('.chat').textContent.includes('Raid tonight'));
+    const chatForm = $('.chat-form');
+    chatForm.elements.body.value = 'On my way <b>now</b>';
+    chatForm.requestSubmit();
+    await waitFor(() => $$('.msg.mine').length);
+    check('chat send (escaped)', $$('.msg.mine').length === 1 && !$('.msg.mine b b') && $('.msg.mine').textContent.includes('<b>now</b>'));
+
+    // ---------- raid ----------
+    const coins0 = saved().rpg.coins;
+    const hp0 = mock().raids[0].hp;
+    btn('Attack').click();
+    const answered = await answerQuiz(true);
+    await waitFor(() => $('.net .center h2'));
+    const dealt = hp0 - mock().raids[0].hp;
+    check(`raid attack: ${answered} questions, ${dealt} damage`, answered === 5 && dealt === 5 * Math.min(24, 13));
+    check('raid attack pays coins', saved().rpg.coins === coins0 + 15);
+    mock().raids[0].hp = 5;
+    await go('#/guild', '.raid');
+    btn('Attack').click();
+    await answerQuiz(true);
+    await waitFor(() => $('.net .center h2'));
+    check('boss defeated', mock().raids[0].hp === 0);
+    await go('#/guild', '.raid');
+    const mats0 = saved().rpg.mats.note || 0;
+    btn('Claim loot').click();
+    await waitFor(() => $('.raid .owned'));
+    check('raid loot claimed', saved().rpg.mats.note === mats0 + 1 && !!$('.raid .owned'));
+
+    // ---------- duels ----------
+    await go('#/duels', '.duel-row');
+    check('incoming duel listed', !!btn('Play'));
+    btn('Play').click();
+    await answerQuiz(true);
+    await waitFor(() => $('.net .center h2'));
+    check('duel finished vs seeded score', $('.net .center').textContent.includes('won'));
+    await go('#/duels', '[data-claim]');
+    const coins1 = saved().rpg.coins;
+    $('[data-claim]').click();
+    await waitFor(() => saved().rpg.coins !== coins1);
+    check('duel win pays 40', saved().rpg.coins === coins1 + 40);
+    await go('#/duels', '[data-challenge]');
+    $('[data-challenge]').click();
+    await answerQuiz(false);
+    await waitFor(() => $('.net .center h2'));
+    check('outgoing challenge waits for rival', $('.net .center').textContent.includes('Waiting'));
+    const out1 = mock().duels.find((d) => d.challenger === meId);
+    check('all-wrong duel run submits 0', !!out1 && out1.c_score === 0);
+
+    // ---------- market ----------
+    await go('#/market', '.tabs');
+    const coins2 = saved().rpg.coins;
+    btn('🪙 15').click();
+    await waitFor(() => saved().rpg.coins !== coins2);
+    check('bought 2 coffees for 15', saved().rpg.coins === coins2 - 15 && saved().rpg.cons.coffee === 2);
+    await waitFor(() => $('.tabs'));
+    btn('Sell').click();
+    const sell = $('form.sell');
+    sell.elements.g.value = 'item:tool_steth';
+    sell.elements.g.dispatchEvent(new W.Event('change'));
+    check('gear quantity locked to 1', sell.elements.qty.disabled);
+    sell.elements.g.value = 'mat:sample';
+    sell.elements.g.dispatchEvent(new W.Event('change'));
+    sell.elements.qty.value = '9';
+    sell.requestSubmit();
+    check('cannot list more than you have', $('form.sell .pf-err').textContent.includes('1–4'));
+    sell.elements.qty.value = '2';
+    sell.elements.price.value = '30';
+    sell.requestSubmit();
+    await waitFor(() => mock().listings.some((l) => l.seller === meId));
+    await waitFor(() => btn('Cancel'));
+    check('listed 2 samples (removed from bag)', saved().rpg.mats.sample === 2 && !!btn('Cancel'));
+    const mine = mock().listings.find((l) => l.seller === meId);
+    Object.assign(mine, { status: 'sold', buyer: W.EndoNetMock.RIVAL });
+    const coins3 = saved().rpg.coins;
+    await go('#/days', '.day-list');
+    await go('#/market', '.tabs');
+    await waitFor(() => saved().rpg.coins !== coins3);
+    check('sale proceeds collected', saved().rpg.coins === coins3 + 30);
+
+    // ---------- hiscores ----------
+    await go('#/hiscores', '.hs-row');
+    const xpRows = $$('.hs-row');
+    check('hiscores XP board ranks both players', xpRows.length === 2 && xpRows[0].textContent.includes('Rivera') && !!$('.hs-row.mine'));
+    btn('Duels').click();
+    await waitFor(() => $('.tab.on') && $('.tab.on').textContent.includes('Duels'));
+    check('duel board shows my win', $$('.hs-row').length === 1 && $('.hs-row.mine') && $('.hs-row').textContent.includes('1 win'));
+    btn('Raids').click();
+    check('raid board shows my damage', $('.hs-row.mine') && $('.hs-row.mine').textContent.includes('130 dmg'));
+    btn('Guilds').click();
+    check('guild board totals members', $$('.hs-row').length === 1 && $('.hs-row').textContent.includes('2 members'));
+
+    // ---------- presence ----------
+    await go('#/', '#wc');
+    await sleep(3200);
+    const pings = W.EndoNetMock.calls.filter((c) => c.includes('rpc/ping')).length;
+    check(`presence pings (${pings}) and rival visible`, pings >= 1 && $('#hudNet .dot.on') && $('#hudNet').textContent.includes('1'));
+
+    // ---------- cloud conflict ----------
+    await sleep(4500);
+    const cloud = mock().saves.find((s) => s.id === meId);
+    check('autosave reached cloud', cloud.data.rpg.coins === saved().rpg.coins);
+    cloud.data = JSON.parse(JSON.stringify(cloud.data));
+    cloud.data.xp = 999;
+    cloud.saved_at = new Date(Date.now() + 60000).toISOString();
+    await go('#/online', '[data-act="out"]');
+    btn('Sign out').click();
+    await waitFor(() => $('#modal:not(.hidden)'));
+    btn('Sign out', $('#modal')).click();
+    await waitFor(() => $('.net-form'));
+    check('signed out', !W.localStorage.getItem('endoRotation3d.auth'));
+    $('.net-form').elements.email.value = 'bender@test.dev';
+    $('.net-form').elements.password.value = 'wrongpass';
+    $('.net-form').requestSubmit();
+    await waitFor(() => $('.net-form .pf-err').textContent);
+    check('bad password rejected', $('.net-form .pf-err').textContent.includes('Invalid'));
+    $('.net-form').elements.password.value = 'hunter22';
+    $('.net-form').requestSubmit();
+    await waitFor(() => $('#modal:not(.hidden)') && $('#modal').textContent.includes('Which progress'));
+    check('conflict prompt on sign-in', $('#modal').textContent.includes('999 XP'));
+    btn('Use cloud save', $('#modal')).click();
+    await sleep(100);
+    check('cloud save loaded', saved().xp === 999);
+
+    // ---------- new browser: sign in from the welcome screen ----------
+    await sleep(4500);
+    const acctXp = mock().saves.find((s) => s.id === meId).data.xp;
+    const newbieId = W.crypto.randomUUID();
+    mock().users.push({ id: newbieId, email: 'newbie@test.dev', password: 'secret1' });
+    W.localStorage.setItem('endoNetMock.db', JSON.stringify(mock()));
+    async function freshBrowser() {
+      frame.src = 'about:blank';
+      await waitFor(() => frame.contentDocument && frame.contentDocument.URL === 'about:blank');
+      localStorage.removeItem('endoRotation3d.v1');
+      localStorage.removeItem('endoRotation3d.auth');
+      frame.src = 'netmock.html';
+      const ok = await waitFor(() => W.document.querySelector('.ob-signin [data-act="ob-show"]'), 6000);
+      W.addEventListener('error', (e) => errors.push(e.message));
+      W.addEventListener('unhandledrejection', (e) => errors.push('rejection: ' + (e.reason && e.reason.message)));
+      return !!ok;
+    }
+    check('welcome screen offers sign-in on a new browser', await freshBrowser());
+    btn('Sign in', $('.ob-signin')).click();
+    let wf = await waitFor(() => $('.ob-signin form'));
+    wf.elements.email.value = 'bender@test.dev';
+    wf.elements.password.value = 'wrongpass';
+    wf.requestSubmit();
+    await waitFor(() => $('.ob-signin .pf-err').textContent);
+    check('welcome sign-in rejects a bad password', $('.ob-signin .pf-err').textContent.includes("don't match") && !W.localStorage.getItem('endoRotation3d.auth'));
+    wf.elements.password.value = 'hunter22';
+    wf.requestSubmit();
+    await waitFor(() => $('#wc'), 6000);
+    check('welcome sign-in restores the account save without making a badge', !!$('#wc') && saved().profile.name === 'Bender' && saved().xp === acctXp);
+    check('no "which progress" prompt on an empty browser', $('#modal').classList.contains('hidden'));
+    await sleep(4500);
+    check('cloud save still intact after restoring', mock().saves.find((s) => s.id === meId).data.xp === acctXp);
+
+    check('second new browser shows the welcome screen', await freshBrowser());
+    btn('Sign in', $('.ob-signin')).click();
+    wf = await waitFor(() => $('.ob-signin form'));
+    wf.elements.email.value = 'newbie@test.dev';
+    wf.elements.password.value = 'secret1';
+    wf.requestSubmit();
+    await waitFor(() => /No saved progress/.test($('.ob-signin').textContent));
+    check('account with no save: told to set up a badge', /No saved progress/.test($('.ob-signin').textContent) && !!$('.profile-form'));
+    $('#pfName').value = 'Newbie';
+    $('.profile-form').requestSubmit();
+    await waitFor(() => mock().saves.some((s) => s.id === newbieId));
+    const nb = mock().saves.find((s) => s.id === newbieId);
+    check('account with no save: new badge saved to the account', !!nb && nb.data.profile.name === 'Newbie' && mock().players.some((p) => p.id === newbieId && p.name === 'Newbie'));
+  } catch (e) {
+    log.push('EXCEPTION: ' + e.message + '\n' + e.stack);
+  }
+  log.push('errors: ' + (errors.length ? errors.join(' | ') : 'none'));
+  out.textContent = 'DONE\n' + log.join('\n');
+}, { once: true });
+</script>
+</body>
+</html>

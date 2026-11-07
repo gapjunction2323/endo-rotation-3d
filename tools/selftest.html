@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Self-test</title></head>
+<body>
+<pre id="out">running</pre>
+<iframe id="f" src="../index.html" style="width:400px;height:800px"></iframe>
+<script>
+// Automated Day 1 playthrough. Serve over http and open tools/selftest.html; results land in #out.
+const out = document.getElementById('out');
+const log = [];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+document.getElementById('f').addEventListener('load', async function run() {
+  this.removeEventListener('load', run);
+  const w = this.contentWindow;
+  const d = () => w.document;
+  const errors = [];
+  w.addEventListener('error', (e) => errors.push(e.message));
+  try {
+    w.location.hash = '#/reset';
+    await sleep(50);
+    w.localStorage.clear();
+    w.addEventListener('pagehide', () => w.localStorage.clear());
+    w.document.addEventListener('visibilitychange', () => w.localStorage.clear());
+    w.location.reload();
+    await new Promise((r) => this.addEventListener('load', r, { once: true }));
+    w.addEventListener('error', (e) => errors.push(e.message));
+    const W = this.contentWindow;
+    const doc = () => W.document;
+    const day = W.ENDO_CONTENT[1];
+    const saved = () => JSON.parse(W.localStorage.getItem('endoRotation3d.v1') || 'null');
+    const xp = () => (saved() || { xp: 0 }).xp;
+    const closeModal = () => { const b = doc().querySelector('#modal:not(.hidden) .modal-actions .btn'); if (b) b.click(); };
+    const findBtn = (sel, text) => [...doc().querySelectorAll(sel)].find((b) => b.textContent.includes(text));
+    const check = (label, ok) => log.push(`${ok ? 'PASS' : 'FAIL'} ${label}`);
+
+    const form = doc().querySelector('.onboard .profile-form');
+    check('onboarding shown after clearing storage', !!form && !doc().querySelector('.day-list'));
+    form.requestSubmit();
+    await sleep(20);
+    check('empty name rejected', !!doc().querySelector('.onboard') && doc().querySelector('.pf-err').textContent.length > 0);
+    const input = form.querySelector('input');
+    input.value = '  Dr. <b>Ada</b>  ';
+    input.dispatchEvent(new W.Event('input'));
+    const pick = form.querySelectorAll('.av')[7];
+    pick.click();
+    check('live preview updates', form.querySelector('.pf-name').textContent === 'Dr. <b>Ada</b>' && form.querySelector('.pf-av').textContent === pick.dataset.av);
+    form.requestSubmit();
+    await sleep(60);
+    const s0 = saved();
+    check(`profile saved: ${JSON.stringify(s0 && s0.profile)}`, !!s0 && s0.profile && s0.profile.name === '<b>Ada</b>' && s0.profile.avatar === pick.dataset.av && s0.profile.createdAt > 0);
+    check(`lastSaved set: ${s0 && s0.lastSaved}`, !!s0 && s0.lastSaved > Date.now() - 10000);
+    check('lands in hospital world', !!doc().getElementById('wc') && W.document.body.classList.contains('in-world'));
+    await sleep(600);
+    const dlg = doc().getElementById('dialog');
+    check('tutorial dialog auto-opens', !dlg.classList.contains('hidden') && dlg.textContent.includes('Chief Resident'));
+    for (let k = 0; k < 10 && !dlg.classList.contains('hidden'); k++) { const b = dlg.querySelector('.dlg-actions .btn'); if (b) b.click(); await sleep(20); }
+    check('tutorial completes and closes', dlg.classList.contains('hidden') && saved().rpg.seenIntro === true);
+    const f0 = W.EndoWorldDebug.frames;
+    await sleep(200);
+    if (W.EndoWorldDebug.frames === f0) {
+      log.push('SKIP walking check: no animation frames (headless --dump-dom)');
+    } else {
+      const p0 = { ...W.EndoWorldDebug.player };
+      W.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'ArrowUp' }));
+      await sleep(400);
+      W.dispatchEvent(new W.KeyboardEvent('keyup', { key: 'ArrowUp' }));
+      const p1 = W.EndoWorldDebug.player;
+      check(`player walks with arrow keys (y ${p0.y.toFixed(2)} -> ${p1.y.toFixed(2)})`, p1.y < p0.y - 0.3);
+    }
+    W.EndoWorldDebug.interact('maya');
+    await sleep(20);
+    for (let k = 0; k < 3; k++) { const b = findBtn('#dialog .btn', 'Next'); if (b) b.click(); }
+    check('NPC dialog offers the DKA case', !!findBtn('#dialog .btn', 'Start case'));
+    findBtn('#dialog .btn', 'Start case').click();
+    await sleep(60);
+    check('Start case opens station with hospital back link', W.location.hash === '#/day/1/s/dka' && doc().querySelector('.back').textContent.includes('hospital'));
+    W.location.hash = '#/days';
+    await sleep(60);
+    check('home shown with greeting', !!doc().querySelector('.day-list') && doc().querySelector('.greet').textContent.includes('Dr. <b>Ada</b>'));
+    check('username escaped (no injected <b> in header/greeting)', !doc().querySelector('.me-name b, .greet b b'));
+    const pill = doc().getElementById('savePill');
+    log.push('save pill right after save: "' + pill.textContent + '" (' + pill.className + ')');
+    await sleep(500);
+    log.push('save pill after 0.5s: "' + doc().getElementById('savePill').textContent + '"');
+    log.push('home save note: ' + doc().querySelector('[data-save-note]').textContent);
+
+    const playDay = async (n) => { for (const st of W.ENDO_CONTENT[n].stations) {
+      W.location.hash = `#/day/${n}/s/${st.id}`;
+      await sleep(80);
+      if (st.type === 'consult' || st.type === 'pager') {
+        for (let i = 0; i < st.nodes.length; i++) {
+          const n = st.nodes[i];
+          const card = doc().querySelectorAll('.node')[i];
+          if (n.kind === 'calc') {
+            card.querySelector('input').value = String(n.answer.min);
+            card.querySelector('form').requestSubmit();
+          } else {
+            if (st.id === 'dka' && i === 0) {
+              const bad = n.options.find((o) => o.danger);
+              [...card.querySelectorAll('.opt')].find((b) => b.textContent.includes(bad.t)).click();
+              log.push('danger click -> stability ' + doc().getElementById('stab').textContent);
+            }
+            const good = n.options.find((o) => o.ok);
+            [...card.querySelectorAll('.opt')].find((b) => b.textContent.includes(good.t)).click();
+          }
+          await sleep(20);
+          card.querySelector('.feedback .btn.primary').click();
+          await sleep(20);
+        }
+      } else if (st.type === 'match') {
+        for (const p of st.pairs) {
+          const i = st.pairs.indexOf(p);
+          doc().querySelector(`.chip[data-i="${i}"]`).click();
+          doc().querySelector(`.fact[data-i="${i}"]`).click();
+        }
+      } else if (st.type === 'sort') {
+        for (let k = 0; k < st.items.length; k++) {
+          const t = doc().getElementById('sortItem').textContent;
+          const it = st.items.find((x) => x.t === t);
+          doc().querySelector(`.sort-btn[data-k="${it.c}"]`).click();
+        }
+      } else if (st.type === 'boss') {
+        for (let k = 0; k < st.questions.length; k++) {
+          doc().querySelectorAll('.reveal')[0].click();
+          findBtn('.grade-row .btn', 'Nailed').click();
+          await sleep(10);
+        }
+      } else if (st.type === 'pearls') {
+        for (let k = 0; k < st.items.length; k++) {
+          const it = st.items[k];
+          const card = doc().querySelectorAll('.node')[k];
+          if (it.kind === 'mcq') {
+            [...card.querySelectorAll('.opt')].find((b) => b.textContent.includes(it.options.find((o) => o.ok).t)).click();
+          } else if (it.kind === 'recall') {
+            const typed = k === 0 ? 'no idea' : [...(it.accept.all || []), (it.accept.any || [''])[0]].join(' ');
+            card.querySelector('input').value = typed;
+            card.querySelector('form').requestSubmit();
+            if (k === 0) findBtn('.grade-row .btn', 'Yes').click();
+          } else {
+            card.querySelector('textarea').value = 'my explanation';
+            card.querySelector('.reveal').click();
+            card.querySelectorAll('.checklist input').forEach((c) => (c.checked = true));
+            findBtn('.feedback .btn', 'Score my').click();
+          }
+          await sleep(10);
+          card.querySelector('.feedback .btn.primary').click();
+          await sleep(10);
+        }
+        log.push('rapid-fire recap pearls: ' + doc().querySelectorAll('.pearl').length + ', highlights: ' + doc().querySelectorAll('.pearl mark').length);
+        findBtn('.btn', 'Complete Day').click();
+      }
+      await sleep(60);
+      closeModal();
+      const s = JSON.parse(W.localStorage.getItem('endoRotation3d.v1')).days[n].stations[st.id];
+      log.push(`day ${n} ${st.id}: ${s ? `${s.score}/${s.max}` : 'NOT SAVED'} | total XP ${xp()}`);
+    } };
+    await playDay(1);
+    const final = JSON.parse(W.localStorage.getItem('endoRotation3d.v1'));
+    log.push('day completed: ' + final.days[1].completed + ' | bonusDay: ' + final.bonusDay);
+    await sleep(400);
+    while (!doc().getElementById('modal').classList.contains('hidden')) { closeModal(); await sleep(30); }
+    const rp = saved().rpg;
+    log.push(`rpg after Day 1: coins ${rp.coins} · mats ${JSON.stringify(rp.mats)} · items ${Object.keys(rp.items).join(',')} · header "${doc().querySelector('.rank-line b').textContent}"`);
+    check('coins, materials and boss loot granted', rp.coins > 100 && rp.mats.sample >= 5 && rp.mats.fragment >= 5 && rp.mats.note === 1 && Object.keys(rp.items).length === 2);
+    W.location.hash = '#/shop';
+    await sleep(60);
+    const c0 = saved().rpg.coins;
+    doc().querySelector('[data-buy="coffee"]').click();
+    await sleep(30);
+    check(`shop purchase (coins ${c0} -> ${saved().rpg.coins}, coffee ${saved().rpg.cons.coffee})`, saved().rpg.cons.coffee === 1 && saved().rpg.coins === c0 - 20);
+    W.location.hash = '#/lab';
+    await sleep(60);
+    doc().querySelector('[data-craft="r_scroll"]').click();
+    await sleep(30);
+    check(`craft scroll (fragments left ${saved().rpg.mats.fragment}, scrolls ${saved().rpg.cons.scroll})`, saved().rpg.cons.scroll >= 1 && saved().rpg.mats.fragment === rp.mats.fragment - 2);
+    W.location.hash = '#/character';
+    await sleep(60);
+    const pts0 = doc().querySelector('.pts').textContent;
+    doc().querySelector('[data-skill="diff"]').click();
+    await sleep(30);
+    check(`spend skill point (${pts0} -> diff rank ${saved().rpg.skills.diff})`, saved().rpg.skills.diff === 1);
+    doc().querySelector('[data-use="coffee"]').click();
+    await sleep(30);
+    check('use coffee -> buff active', saved().rpg.buffs.coffee === 1);
+    const eq = doc().querySelector('[data-equip]:not(.sel)');
+    if (eq) { eq.click(); await sleep(30); }
+    check(`equip loot (${JSON.stringify(saved().rpg.equip)})`, Object.keys(saved().rpg.equip).length >= 1);
+    W.location.hash = '#/day/1/s/dka';
+    await sleep(60);
+    const nb = doc().querySelector('.narrow');
+    check(`narrow button on replay (${nb && nb.textContent.trim()})`, !!nb);
+    const enabledBefore = doc().querySelectorAll('.node .opt:not(:disabled)').length;
+    nb.click();
+    check(`narrow removes a wrong option (${enabledBefore} -> ${doc().querySelectorAll('.node .opt:not(:disabled)').length})`, doc().querySelectorAll('.node .opt:not(:disabled)').length === enabledBefore - 1);
+    W.location.hash = '#/';
+    await sleep(100);
+    check('world renders after returning', !!doc().getElementById('wc'));
+
+    const api = W.EndoRotation;
+    const usedDays = (days) => Object.fromEntries(Object.entries(days).filter(([, d]) => d.completed || Object.keys(d.stations).length));
+    const snap = (s) => JSON.stringify({ xp: s.xp, days: usedDays(s.days), bonusDay: s.bonusDay, profile: s.profile });
+    const before = snap(saved());
+    const code = api.exportCode();
+    const json = api.exportJSON();
+    log.push(`export: JSON ${json.length} chars, code ${code.length} chars`);
+    check('parseSave(JSON) matches', snap(api.parseSave(json)) === before);
+    if (snap(api.parseSave(json)) !== before) log.push(`  saved:  ${before}\n  parsed: ${snap(api.parseSave(json))}`);
+    let rejected = 0;
+    ['garbage', '{"xp":"lots","days":{}}', '[]', JSON.stringify({ xp: 5, days: { 1: { stations: { a: { score: '<img>' } } } } })].forEach((t) => { try { api.parseSave(t); } catch (e) { rejected++; } });
+    check(`invalid saves rejected (${rejected}/4)`, rejected === 4);
+
+    W.location.hash = '#/settings';
+    await sleep(80);
+    findBtn('.btn', 'Reset all progress').click();
+    findBtn('#modal .btn', 'Reset').click();
+    await sleep(60);
+    check(`reset clears XP, keeps profile (xp ${xp()})`, xp() === 0 && saved().profile.name === '<b>Ada</b>');
+
+    W.location.hash = '#/settings';
+    await sleep(80);
+    doc().querySelector('#backup .import textarea').value = code;
+    findBtn('#backup .btn', 'Import code').click();
+    await sleep(20);
+    log.push('import confirm: ' + doc().querySelector('#modal .debrief').textContent.replace(/\s+/g, ' ').trim());
+    findBtn('#modal .btn', 'Replace').click();
+    await sleep(80);
+    check('import code round-trip restores state', snap(saved()) === before);
+
+    W.location.hash = '#/settings';
+    await sleep(80);
+    findBtn('.btn', 'Reset all progress').click();
+    findBtn('#modal .btn', 'Reset').click();
+    await sleep(60);
+    W.location.hash = '#/settings';
+    await sleep(80);
+    const fileInput = doc().querySelector('#backup .import input[type=file]');
+    const dt = new W.DataTransfer();
+    dt.items.add(new W.File([json], 'endo-rotation-ada-test.json', { type: 'application/json' }));
+    fileInput.files = dt.files;
+    fileInput.dispatchEvent(new W.Event('change'));
+    await sleep(150);
+    findBtn('#modal .btn', 'Replace').click();
+    await sleep(80);
+    check('import file round-trip restores state', snap(saved()) === before);
+
+    W.location.hash = '#/settings';
+    await sleep(80);
+    doc().querySelector('#backup .import textarea').value = 'not a save';
+    findBtn('#backup .btn', 'Import code').click();
+    await sleep(20);
+    check('bad code shows error, no modal', doc().getElementById('modal').classList.contains('hidden') && !!doc().querySelector('.toast.bad'));
+
+    const realSet = W.Storage.prototype.setItem;
+    W.Storage.prototype.setItem = function () { throw new W.DOMException('quota', 'QuotaExceededError'); };
+    doc().getElementById('unlockAll').click();
+    await sleep(100);
+    const pillErr = doc().getElementById('savePill').textContent;
+    const warn = doc().querySelector('#modal:not(.hidden) h2');
+    check(`storage failure -> pill "${pillErr}", modal "${warn && warn.textContent}"`, pillErr.includes('Not saved') && !!warn);
+    closeModal();
+    W.Storage.prototype.setItem = realSet;
+    doc().getElementById('unlockAll').click();
+    await sleep(500);
+    check(`storage recovers -> pill "${doc().getElementById('savePill').textContent}"`, !doc().getElementById('savePill').textContent.includes('Not saved'));
+
+    W.location.hash = '#/';
+    await sleep(100);
+    const floorLabel = doc().querySelector('.hud-floor').textContent;
+    check(`world opens on the next unlocked floor ("${floorLabel}")`, floorLabel.startsWith('Floor 2'));
+    const f2rooms = W.ENDO_RPG.floors[2].rooms.map((r) => r.name).filter(Boolean);
+    check(`Floor 2 has its own layout without an ED or ICU (${f2rooms.join(', ')})`, !f2rooms.some((n) => /emergency|icu/i.test(n)) && W.ENDO_RPG.world.rooms.some((r) => r.id === 'ed') && W.ENDO_RPG.world.rooms.some((r) => r.id === 'icu'));
+    W.EndoWorldDebug.interact('maya');
+    await sleep(20);
+    for (let k = 0; k < 3; k++) { const b = findBtn('#dialog .btn', 'Next'); if (b) b.click(); }
+    check(`Day 2 patient takes the bed (${doc().querySelector('#dialog .dlg-head b').textContent})`, doc().querySelector('#dialog .dlg-head b').textContent.includes('Reyes') && doc().querySelector('#dialog .dlg-info').textContent.includes('Thirsty Truck Driver'));
+    doc().querySelector('#dialog .dlg-x').click();
+    W.EndoWorldDebug.interact('elevator');
+    await sleep(20);
+    const floorBtn = doc().querySelector('#dialog [data-floor="1"]');
+    check('elevator offers Floor 1', !!floorBtn && !doc().querySelector('#dialog [data-floor="3"]'));
+    floorBtn.click();
+    await sleep(60);
+    check(`elevator switches floors ("${doc().querySelector('.hud-floor').textContent}", saved floor ${saved().rpg.floor})`, doc().querySelector('.hud-floor').textContent.startsWith('Floor 1') && saved().rpg.floor === 1);
+    await playDay(2);
+    while (!doc().getElementById('modal').classList.contains('hidden')) { closeModal(); await sleep(30); }
+    const d2 = saved().days[2];
+    const d2max = W.ENDO_CONTENT[2].stations.length;
+    check(`Day 2 complete (${Object.values(d2.stations).filter((s) => s.done).length}/${d2max} stations, floor reset to ${saved().rpg.floor})`, d2.completed && Object.values(d2.stations).filter((s) => s.done).length === d2max && saved().rpg.floor === null);
+
+    W.location.hash = '#/';
+    await sleep(150);
+    const f3Label = doc().querySelector('.hud-floor').textContent;
+    check(`world opens on Floor 3 after Day 2 ("${f3Label}")`, f3Label.startsWith('Floor 3') && f3Label.includes('Cardiometabolic'));
+    const f3rooms = W.ENDO_RPG.floors[3].rooms.map((r) => r.name).filter(Boolean);
+    check(`Floor 3 has its own layout without an ED or ICU (${f3rooms.join(', ')})`, !f3rooms.some((n) => /emergency|icu/i.test(n)) && f3rooms.join() !== f2rooms.join());
+    const sp = saved().rpg.pos;
+    check(`arrived at the Floor 3 elevator (pos ${sp && `${sp.x},${sp.y},f${sp.f}`})`, !sp || sp.f !== 3 || Math.hypot(sp.x - 18.5, sp.y - 27.2) < 0.5);
+    W.EndoWorldDebug.interact('maya');
+    await sleep(20);
+    for (let k = 0; k < 3; k++) { const b = findBtn('#dialog .btn', 'Next'); if (b) b.click(); }
+    check(`Day 3 patient on the step-down unit (${doc().querySelector('#dialog .dlg-head b').textContent})`, doc().querySelector('#dialog .dlg-head b').textContent.includes('Novak') && doc().querySelector('#dialog .dlg-info').textContent.includes('Milkshake'));
+    doc().querySelector('#dialog .dlg-x').click();
+    W.EndoWorldDebug.interact('chef');
+    await sleep(20);
+    check('Dietitian Rosa talks without a station', doc().querySelector('#dialog .dlg-head b').textContent.includes('Rosa'));
+    doc().querySelector('#dialog .dlg-x').click();
+    await playDay(3);
+    while (!doc().getElementById('modal').classList.contains('hidden')) { closeModal(); await sleep(30); }
+    const d3 = saved().days[3];
+    const d3max = W.ENDO_CONTENT[3].stations.length;
+    check(`Day 3 complete (${Object.values(d3.stations).filter((s) => s.done).length}/${d3max} stations)`, d3.completed && Object.values(d3.stations).filter((s) => s.done).length === d3max);
+
+    W.location.hash = '#/';
+    await sleep(150);
+    const f4Label = doc().querySelector('.hud-floor').textContent;
+    check(`world opens on Floor 4 after Day 3 ("${f4Label}")`, f4Label.startsWith('Floor 4') && f4Label.includes('Oncology'));
+    const f4rooms = W.ENDO_RPG.floors[4].rooms.map((r) => r.name).filter(Boolean);
+    check(`Floor 4 has its own layout without an ED or ICU (${f4rooms.join(', ')})`, !f4rooms.some((n) => /emergency|icu/i.test(n)) && f4rooms.join() !== f3rooms.join() && f4rooms.join() !== f2rooms.join());
+    W.EndoWorldDebug.interact('maya');
+    await sleep(20);
+    for (let k = 0; k < 3; k++) { const b = findBtn('#dialog .btn', 'Next'); if (b) b.click(); }
+    check(`Day 4 patient on Hem-Onc 5W (${doc().querySelector('#dialog .dlg-head b').textContent})`, doc().querySelector('#dialog .dlg-head b').textContent.includes('Dawson') && doc().querySelector('#dialog .dlg-info').textContent.includes('Confused Smoker'));
+    doc().querySelector('#dialog .dlg-x').click();
+    W.EndoWorldDebug.interact('surgeon');
+    await sleep(20);
+    check('Endocrine surgeon talks without a station', doc().querySelector('#dialog .dlg-head b').textContent.includes('Haddad'));
+    doc().querySelector('#dialog .dlg-x').click();
+    await playDay(4);
+    while (!doc().getElementById('modal').classList.contains('hidden')) { closeModal(); await sleep(30); }
+    const d4 = saved().days[4];
+    const d4max = W.ENDO_CONTENT[4].stations.length;
+    check(`Day 4 complete (${Object.values(d4.stations).filter((s) => s.done).length}/${d4max} stations)`, d4.completed && Object.values(d4.stations).filter((s) => s.done).length === d4max);
+
+    W.location.hash = '#/';
+    await sleep(150);
+    const f5Label = doc().querySelector('.hud-floor').textContent;
+    check(`world opens on Floor 5 after Day 4 ("${f5Label}")`, f5Label.startsWith('Floor 5') && f5Label.includes('Bone'));
+    const f5rooms = W.ENDO_RPG.floors[5].rooms.map((r) => r.name).filter(Boolean);
+    check(`Floor 5 has its own layout without an ED or ICU (${f5rooms.join(', ')})`, !f5rooms.some((n) => /emergency|icu/i.test(n)) && [f2rooms, f3rooms, f4rooms].every((r) => r.join() !== f5rooms.join()));
+    W.EndoWorldDebug.interact('maya');
+    await sleep(20);
+    for (let k = 0; k < 3; k++) { const b = findBtn('#dialog .btn', 'Next'); if (b) b.click(); }
+    check(`Day 5 patient on Ortho Ward 6E (${doc().querySelector('#dialog .dlg-head b').textContent})`, doc().querySelector('#dialog .dlg-head b').textContent.includes('Lindqvist') && doc().querySelector('#dialog .dlg-info').textContent.includes('Broke From Standing'));
+    doc().querySelector('#dialog .dlg-x').click();
+    W.EndoWorldDebug.interact('pt');
+    await sleep(20);
+    check('PT coach talks without a station', doc().querySelector('#dialog .dlg-head b').textContent.includes('Lena'));
+    doc().querySelector('#dialog .dlg-x').click();
+    await playDay(5);
+    while (!doc().getElementById('modal').classList.contains('hidden')) { closeModal(); await sleep(30); }
+    const d5 = saved().days[5];
+    const d5max = W.ENDO_CONTENT[5].stations.length;
+    check(`Day 5 complete (${Object.values(d5.stations).filter((s) => s.done).length}/${d5max} stations)`, d5.completed && Object.values(d5.stations).filter((s) => s.done).length === d5max);
+
+    log.push('errors: ' + (errors.length ? errors.join(' ; ') : 'none'));
+  } catch (e) {
+    log.push('EXCEPTION: ' + e.message + '\n' + e.stack);
+  }
+  out.textContent = 'DONE\n' + log.join('\n');
+});
+</script>
+</body>
+</html>
