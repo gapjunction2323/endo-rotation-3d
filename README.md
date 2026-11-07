@@ -4,6 +4,17 @@ A 14-day gamified endocrinology rotation for internal medicine residents, built 
 
 No build step and no dependencies. It's plain HTML, CSS, and JS.
 
+## World map: the Realm of Corporia
+
+`map.html` is the world map for the 3D expansion. It's drawn entirely from `content/world.js`, which holds the whole world as data:
+
+- 11 realms around a central hub (the Arcane Citadel), each with its landmarks and map position.
+- One home for each of the 20 board categories: a 10-floor dungeon, a 5-floor tower or a 5-floor guild hall. 160 floors in all, each with a topic and a boss.
+- Three travel networks modeled on body systems: arterial rivers from the Crimson Forge, neural roads along the Spinal Road, and Lymph Gates for fast travel.
+- World bosses for multisystem disease that roam between realms.
+
+The existing Endocrinology days map onto the Alchemical Sanctum's floors (Days 1–5 are floors 2–6). A 3D world, whether Three.js or Godot, can read the same file. Positions are in map units on a 1600 × 1000 canvas.
+
 ## Play locally
 
 ```powershell

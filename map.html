@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Realm of Corporia</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="World map for Endo Rotation 3D: every board category has one home among eleven realms around the Arcane Citadel.">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&family=Cinzel:wght@500;600;700&family=IM+Fell+English:ital@0;1&display=swap">
+<style>
+/* Layout: the parchment map is the hero; under it, the selected realm's floors beside the board-category ledger.
+   One committed look: a walnut-and-brass game interface framing an inked parchment map. */
+:root {
+  --walnut: #16110c;
+  --panel: #201912;
+  --panel-2: #2a2117;
+  --rule: #463826;
+  --parchment: #f0e5ca;
+  --faded: #b5a585;
+  --brass: #d6aa4e;
+  --blood: #cf5444;
+  --vein: #6b94c4;
+  --nerve: #e0b44a;
+  --lymph: #6cb684;
+  --sea: #d9ccad;
+  --veil: rgba(22, 17, 12, 0.92);
+  --display: "Cinzel", "Trajan Pro", "Iowan Old Style", Georgia, serif;
+  --lettering: "IM Fell English", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --ui: "Alegreya Sans", "Gill Sans", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--walnut);
+  color: var(--parchment);
+  font: 400 16px/1.5 var(--ui);
+}
+.page {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+  display: grid;
+  gap: 14px;
+}
+:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+button { font: inherit; color: inherit; }
+
+/* header */
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 32px; }
+.eyebrow { margin: 0; font: 700 12px/1.2 var(--ui); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass); }
+h1 { margin: 4px 0 0; font: 600 clamp(28px, 4vw, 44px)/1.05 var(--display); letter-spacing: 0.03em; text-wrap: balance; }
+.lede { margin: 8px 0 0; max-width: 64ch; color: var(--faded); }
+.tally { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
+.tally div { display: grid; gap: 2px; }
+.tally dt { font: 700 11px/1.2 var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--faded); }
+.tally dd { margin: 0; font: 600 26px/1 var(--display); font-variant-numeric: tabular-nums; }
+.tally dd small { font: 500 15px var(--ui); color: var(--faded); }
+
+/* stage: toolbar + map, sized so the whole map fits on screen */
+.stage { width: min(100%, max(720px, calc((100dvh - 220px) * 1.6))); margin-inline: auto; display: grid; gap: 10px; min-width: 0; }
+
+/* toolbar */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.layers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.layers > span { font: 700 11px var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--faded); margin-right: 4px; }
+.toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 12px 5px 9px; min-height: 34px;
+  border: 1px solid var(--rule); border-radius: 999px;
+  background: var(--panel); color: var(--faded);
+  font: 500 14px var(--ui); cursor: pointer;
+}
+.toggle svg { width: 24px; height: 12px; flex: none; }
+.toggle[aria-pressed="true"] { color: var(--parchment); border-color: var(--brass); background: var(--panel-2); }
+.toggle[aria-pressed="false"] svg { opacity: 0.35; }
+.zoombar { display: flex; gap: 4px; }
+.zoombar button {
+  width: 36px; height: 34px; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--panel); color: var(--parchment); font: 600 18px/1 var(--ui); cursor: pointer;
+}
+.zoombar button.fit { width: auto; padding: 0 12px; font-size: 14px; font-weight: 500; }
+
+/* map */
+.mapwrap {
+  position: relative; width: 100%;
+  aspect-ratio: 16 / 10; min-height: 300px;
+  background: #1b150f; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden;
+}
+#map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.mapwrap.dragging #map { cursor: grabbing; }
+#map .hit { cursor: pointer; }
+#map .hit:focus-visible { outline: none; }
+#map .region:focus-visible { stroke: var(--brass); stroke-width: 3; }
+.tip {
+  position: absolute; z-index: 3; pointer-events: none; max-width: 280px;
+  padding: 7px 11px; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--veil); color: var(--parchment); font: 14px/1.35 var(--ui);
+}
+.tip b { display: block; font: 600 15px/1.25 var(--display); letter-spacing: 0.02em; }
+.tip span { color: var(--faded); }
+.pick {
+  position: absolute; z-index: 2; right: 10px; top: 10px; max-width: calc(100% - 20px);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  padding: 6px 6px 6px 14px; border: 1px solid var(--rule); border-radius: 22px;
+  background: var(--veil); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.pick b { font: 600 16px/1.2 var(--display); letter-spacing: 0.02em; }
+.pick .meta { color: var(--faded); font-size: 14px; }
+.pick .go {
+  padding: 5px 12px; min-height: 32px;
+  border: 1px solid var(--brass); border-radius: 999px; background: transparent; color: var(--brass);
+  font: 600 14px var(--ui); cursor: pointer;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { display: inline-block; padding: 2px 9px; border: 1px solid var(--rule); border-radius: 999px; font-size: 13px; color: var(--parchment); }
+
+/* below the map */
+.below { display: grid; gap: 18px; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); align-items: start; }
+.sheet { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 20px clamp(16px, 2.4vw, 28px) 24px; min-width: 0; }
+.sheet h2 { margin: 2px 0 0; font: 600 clamp(24px, 2.8vw, 32px)/1.12 var(--display); letter-spacing: 0.02em; text-wrap: balance; }
+.jump { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.jump label { font: 700 11px var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--faded); }
+.jump select {
+  min-height: 36px; padding: 4px 10px; max-width: 100%;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--panel-2); color: var(--parchment); font: 500 15px var(--ui);
+}
+.epithet { margin: 2px 0 0; font: italic 18px/1.35 var(--lettering); color: var(--brass); }
+.lore { margin: 10px 0 0; max-width: 68ch; color: var(--faded); }
+.site { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--rule); scroll-margin-top: 16px; }
+.site header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.site h3 { margin: 0; font: 600 19px/1.25 var(--display); letter-spacing: 0.02em; }
+.kind { margin: 0; font: 700 11.5px var(--ui); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faded); }
+.cat-chip { margin: 8px 0 0; display: inline-block; padding: 2px 10px; border: 1px solid var(--brass); border-radius: 999px; color: var(--brass); font-size: 13.5px; }
+.play { margin: 8px 0 0; color: var(--faded); font-size: 15px; max-width: 64ch; }
+.progress { margin: 8px 0 0; font-size: 14.5px; color: var(--parchment); }
+.progress b { color: var(--lymph); font-weight: 700; }
+.floors { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }
+.floors li {
+  display: grid; grid-template-columns: 3.2em minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline;
+  padding: 7px 10px; border-radius: 5px;
+}
+.floors li:nth-child(odd) { background: var(--panel-2); }
+.floors .fn { font: 600 15px var(--display); color: var(--brass); font-variant-numeric: tabular-nums; }
+.floors .ft { min-width: 0; }
+.floors .st { font-size: 12.5px; white-space: nowrap; color: var(--faded); }
+.floors .st.done { padding: 1px 8px; border-radius: 999px; background: rgba(108, 182, 132, 0.16); color: #b9e2c3; }
+.floors li.boss { background: rgba(207, 84, 68, 0.12); border: 1px solid rgba(207, 84, 68, 0.42); margin-top: 4px; }
+.floors li.boss .fn { color: var(--blood); }
+.floors li.boss b { display: block; font: 600 15.5px/1.3 var(--display); letter-spacing: 0.02em; color: var(--parchment); }
+.floors li.boss span.topic { color: var(--faded); }
+.travel { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--rule); }
+.travel h3, .ledger h3 { margin: 0; font: 700 11.5px var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--faded); }
+.travel ul { margin: 8px 0 0; padding-left: 0; list-style: none; display: grid; gap: 6px; }
+.travel li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: center; }
+.travel li svg { width: 24px; height: 12px; }
+.linkish { padding: 0; border: 0; background: none; color: var(--brass); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font: inherit; }
+
+/* category ledger */
+.ledger { display: grid; gap: 14px; }
+.ledger .head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px; }
+.ledger .head h2 { font-size: 22px; }
+.ledger .hint { margin: 2px 0 0; color: var(--faded); font-size: 14.5px; }
+.clear { padding: 4px 10px; border: 1px solid var(--rule); border-radius: 999px; background: transparent; color: var(--faded); font: 500 13px var(--ui); cursor: pointer; }
+.cats { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.cat { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 5px 8px; border-radius: 6px; }
+.cat:hover, .cat.lit { background: var(--panel-2); }
+.cat input {
+  appearance: none; -webkit-appearance: none; margin: 0; width: 18px; height: 18px;
+  border: 1.5px solid var(--faded); border-radius: 3px; display: grid; place-content: center; cursor: pointer; background: transparent;
+}
+.cat input:checked { background: var(--brass); border-color: var(--brass); }
+.cat input:checked::after { content: ""; width: 9px; height: 5px; border-left: 2px solid var(--walnut); border-bottom: 2px solid var(--walnut); transform: translateY(-1px) rotate(-45deg); }
+.cat .name { padding: 2px 0; border: 0; background: none; text-align: left; cursor: pointer; display: grid; min-width: 0; }
+.cat .name span { font: 500 15px/1.3 var(--ui); color: var(--parchment); }
+.cat .name small { font: italic 13.5px/1.3 var(--lettering); color: var(--faded); }
+.cat .floorsn { min-width: 30px; padding: 1px 7px; border: 1px solid var(--rule); border-radius: 999px; text-align: center; font: 700 12px var(--ui); color: var(--faded); font-variant-numeric: tabular-nums; }
+.legend { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.legend li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+.legend svg { width: 28px; height: 14px; margin-top: 4px; }
+.legend b { font-weight: 700; }
+.legend p { margin: 0; color: var(--faded); font-size: 14.5px; }
+.note { margin: 0; color: var(--faded); font-size: 14px; }
+
+/* map art text (inline SVG) */
+#map text { pointer-events: none; }
+.t-realm { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: 1.7px; fill: #39271a; paint-order: stroke; stroke: #f3e9cf; stroke-width: 5px; stroke-linejoin: round; }
+.t-cap { font-family: var(--lettering); font-style: italic; font-size: 14px; fill: #5a4430; paint-order: stroke; stroke: #f3e9cf; stroke-width: 4px; stroke-linejoin: round; }
+.t-site { font-family: var(--lettering); font-style: italic; font-size: 16px; fill: #39271a; paint-order: stroke; stroke: #f3e9cf; stroke-width: 4.5px; stroke-linejoin: round; }
+.t-site-cap { font-family: var(--lettering); font-style: italic; font-size: 13.5px; fill: #5a4430; paint-order: stroke; stroke: #f3e9cf; stroke-width: 4px; stroke-linejoin: round; }
+.t-boss { font-family: var(--lettering); font-style: italic; font-size: 13.5px; fill: #7a221c; paint-order: stroke; stroke: #f3e9cf; stroke-width: 4px; stroke-linejoin: round; }
+.t-title { font-family: var(--display); font-weight: 700; font-size: 24px; letter-spacing: 1.5px; fill: #39271a; }
+.t-sea { font-family: var(--lettering); font-style: italic; font-size: 19px; fill: #4c3a27; }
+.t-route { font-family: var(--lettering); font-style: italic; font-size: 13.5px; paint-order: stroke; stroke: #f3e9cf; stroke-width: 4px; stroke-linejoin: round; }
+.t-compass { font-family: var(--display); font-weight: 700; font-size: 13px; fill: #39271a; }
+.ring { fill: none; stroke: #b8860b; stroke-width: 3.5; }
+.ring.pulse { animation: pulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(1.12); } }
+.off { display: none; }
+
+@media (max-width: 899px) {
+  .below { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 759px) {
+  .stage { width: 100%; }
+  .mapwrap { aspect-ratio: auto; height: 64vh; min-height: 380px; }
+  .pick b { font-size: 14.5px; }
+  .pick .meta { display: none; }
+  .tally dd { font-size: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ring.pulse { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div>
+      <p class="eyebrow">Endo Rotation 3D · World map</p>
+      <h1>The Realm of Corporia</h1>
+      <p class="lede">Every board category has exactly one home. Eleven realms surround the Arcane Citadel, linked by arterial rivers, neural roads and Lymph Gates. Select a realm or a category to see its floors.</p>
+    </div>
+    <dl class="tally" aria-label="World totals">
+      <div><dt>Board categories placed</dt><dd id="tCats">20<small> / 20</small></dd></div>
+      <div><dt>Realms</dt><dd>11<small> + hub</small></dd></div>
+      <div><dt>Floors</dt><dd id="tFloors">160</dd></div>
+      <div><dt>Already written</dt><dd id="tWritten">5</dd></div>
+    </dl>
+  </header>
+
+  <div class="stage">
+  <div class="toolbar">
+    <div class="layers" role="group" aria-label="Map layers">
+      <span>Show</span>
+      <button class="toggle" type="button" id="lay-rivers" data-layer="rivers" aria-pressed="true"><svg viewBox="0 0 24 12" aria-hidden="true"><path d="M1 8 Q7 2 12 6 T23 4" fill="none" stroke="#cf5444" stroke-width="3.2" stroke-linecap="round"/></svg>Arterial rivers</button>
+      <button class="toggle" type="button" id="lay-roads" data-layer="roads" aria-pressed="true"><svg viewBox="0 0 24 12" aria-hidden="true"><path d="M1 6 H23" fill="none" stroke="#e0b44a" stroke-width="2.4" stroke-dasharray="5 3" stroke-linecap="round"/></svg>Neural roads</button>
+      <button class="toggle" type="button" id="lay-gates" data-layer="gates" aria-pressed="true"><svg viewBox="0 0 24 12" aria-hidden="true"><path d="M1 9 Q12 -3 23 9" fill="none" stroke="#6cb684" stroke-width="1.6" stroke-dasharray="1.5 3.5" stroke-linecap="round"/><circle cx="12" cy="6" r="3.6" fill="#d5ecd3" stroke="#2f6e45" stroke-width="1.8"/></svg>Lymph Gates</button>
+      <button class="toggle" type="button" id="lay-bosses" data-layer="bosses" aria-pressed="true"><svg viewBox="0 0 24 12" aria-hidden="true"><circle cx="12" cy="6" r="5.2" fill="#7d2420" stroke="#f0e5ca" stroke-width="1"/></svg>World bosses</button>
+    </div>
+    <div class="zoombar" role="group" aria-label="Zoom">
+      <button type="button" id="zoomOut" aria-label="Zoom out">−</button>
+      <button type="button" id="zoomIn" aria-label="Zoom in">+</button>
+      <button type="button" id="zoomFit" class="fit">Fit map</button>
+    </div>
+  </div>
+
+  <section class="mapwrap" id="mapwrap" aria-label="World map of Corporia. Drag to pan, scroll or pinch to zoom, select a realm for details.">
+    <svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="The Realm of Corporia world map"></svg>
+    <div class="tip" id="tip" hidden></div>
+    <div class="pick" id="pick" aria-live="polite"></div>
+  </section>
+  </div>
+
+  <div class="below">
+    <article class="sheet" id="dossier" aria-live="polite">
+      <div class="jump">
+        <label for="jump">Realm</label>
+        <select id="jump"></select>
+      </div>
+      <div id="realmView"></div>
+    </article>
+
+    <aside class="sheet ledger" aria-label="Board categories">
+      <div>
+        <div class="head">
+          <h2>Board categories</h2>
+          <button class="clear" type="button" id="clearCats">Clear</button>
+        </div>
+        <p class="hint">Tick categories to light up their homes on the map. Select a name to open its floors. The badge is the floor count.</p>
+      </div>
+      <ul class="cats" id="cats"></ul>
+      <div>
+        <h3>How to travel</h3>
+        <ul class="legend" id="legend"></ul>
+      </div>
+      <p class="note">Multisystem disease appears as world bosses that roam between realms for guilds to fight together.</p>
+    </aside>
+  </div>
+</div>
+<script src="content/world.js"></script>
+<script src="map.js"></script>
+</body>
+</html>
